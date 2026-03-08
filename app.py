@@ -1,65 +1,53 @@
 import streamlit as st
-import numpy as np
 from ultralytics import YOLO
-from PIL import Image
+from PIL import Image, ImageDraw
+import numpy as np
 
-st.set_page_config(page_title="Car Color & People Count", layout="centered")
-st.title("🚗 Car Color Detection & 👥 People Count")
+st.title("🚗 Car & 👤 People Detection App")
 
+# Load YOLO model
 @st.cache_resource
 def load_model():
     return YOLO("yolov8n.pt")
 
 model = load_model()
 
-uploaded_image = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
+uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-def detect_car_color(car_roi):
-    if car_roi.size == 0:
-        return "Unknown"
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    img_array = np.array(image)
 
-    avg_color = np.mean(car_roi, axis=(0, 1))  # RGB
-    r, g, b = avg_color
+    results = model(img_array)
 
-    if b > r and b > g:
-        return "Blue"
-    elif r > g and r > b:
-        return "Red"
-    elif g > r and g > b:
-        return "Green"
-    else:
-        return "Other"
+    draw = ImageDraw.Draw(image)
 
-if uploaded_image:
-    image = Image.open(uploaded_image).convert("RGB")
-    frame = np.array(image)
-
-    results = model(frame, conf=0.4)
-
-    car_count = 0
     person_count = 0
+    car_count = 0
 
     for r in results:
         boxes = r.boxes
-
         for box in boxes:
             cls = int(box.cls[0])
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            label = model.names[cls]
+            conf = float(box.conf[0])
 
-            roi = frame[y1:y2, x1:x2]
+            if label in ["person", "car"]:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            if cls == 2:  # Car
-                car_count += 1
-                car_color = detect_car_color(roi)
+                if label == "person":
+                    person_count += 1
+                    color = "red"
+                else:
+                    car_count += 1
+                    color = "blue"
 
-            elif cls == 0:  # Person
-                person_count += 1
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+                draw.text((x1, y1), f"{label} {conf:.2f}", fill=color)
 
-        # Use YOLO built-in drawing
-        plotted = r.plot()
+    st.image(image, caption="Detection Result", use_column_width=True)
 
-    st.image(plotted, caption="Detection Result", use_container_width=True)
+    st.subheader("📊 Detection Counts")
+    st.write(f"👤 People: {person_count}")
+    st.write(f"🚗 Cars: {car_count}")
 
-    st.subheader("📊 Detection Summary")
-    st.write(f"🚗 Cars detected: {car_count}")
-    st.write(f"👥 People detected: {person_count}")
