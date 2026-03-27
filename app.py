@@ -1,9 +1,12 @@
 import streamlit as st
-from ultralytics import YOLO
-from PIL import Image, ImageDraw
+import cv2
 import numpy as np
+from ultralytics import YOLO
+from PIL import Image
 
-st.title("🚗 Car & 👤 People Detection App")
+st.set_page_config(page_title="Car & People Detection", layout="centered")
+
+st.title("🚗 Car Color Detection & 👥 People Counter")
 
 # Load YOLO model
 @st.cache_resource
@@ -12,42 +15,58 @@ def load_model():
 
 model = load_model()
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+# Simple color detection
+def get_color(image, box):
+    x1, y1, x2, y2 = map(int, box)
+    crop = image[y1:y2, x1:x2]
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
-    img_array = np.array(image)
+    avg_color = np.mean(crop, axis=(0, 1))
 
-    results = model(img_array)
+    if avg_color[2] > 150:
+        return "Red"
+    elif avg_color[1] > 150:
+        return "Green"
+    elif avg_color[0] > 150:
+        return "Blue"
+    else:
+        return "Dark"
 
-    draw = ImageDraw.Draw(image)
+uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
 
-    person_count = 0
+if uploaded_file:
+    image = Image.open(uploaded_file)
+    image_np = np.array(image)
+
+    results = model(image_np)
+
+    people_count = 0
     car_count = 0
 
-    for r in results:
-        boxes = r.boxes
-        for box in boxes:
+    for result in results:
+        for box in result.boxes:
             cls = int(box.cls[0])
+            x1, y1, x2, y2 = box.xyxy[0]
+
             label = model.names[cls]
-            conf = float(box.conf[0])
 
-            if label in ["person", "car"]:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
+            if label == "person":
+                people_count += 1
+                color = (0, 255, 0)
 
-                if label == "person":
-                    person_count += 1
-                    color = "red"
-                else:
-                    car_count += 1
-                    color = "blue"
+            elif label == "car":
+                car_count += 1
+                detected_color = get_color(image_np, (x1, y1, x2, y2))
+                label = f"Car ({detected_color})"
+                color = (255, 0, 0)
 
-                draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-                draw.text((x1, y1), f"{label} {conf:.2f}", fill=color)
+            else:
+                continue
 
-    st.image(image, caption="Detection Result", use_column_width=True)
+            cv2.rectangle(image_np, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            cv2.putText(image_np, label, (int(x1), int(y1) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    st.subheader("📊 Detection Counts")
-    st.write(f"👤 People: {person_count}")
-    st.write(f"🚗 Cars: {car_count}")
+    st.image(image_np, caption="Processed Image", use_column_width=True)
 
+    st.success(f"👥 People Count: {people_count}")
+    st.success(f"🚗 Car Count: {car_count}")
